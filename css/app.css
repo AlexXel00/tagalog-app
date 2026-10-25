@@ -1,0 +1,119 @@
+/* Tagalog-App - Grundlayout: eine Spalte fuers Handy, Karten fuer jeden Bereich */
+:root {
+  --bg: #eef4f3;
+  --surface: #ffffff;
+  --fg: #0f2220;
+  --muted: #4b625e;
+  --line: #d2dfdc;
+  --accent: #0b776d;
+  --accent-fg: #ffffff;
+  --accent-soft: #d8efeb;
+  --mango: #b97a00;
+  --mango-soft: #fbefd2;
+  --good: #1d7f47;
+  --bad: #b43a2c;
+  --bad-soft: #f8e0dc;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c1615; --surface: #13211f; --fg: #e3eeec; --muted: #93aaa6; --line: #253d39;
+    --accent: #3bc0b1; --accent-fg: #052320; --accent-soft: #163b37;
+    --mango: #f0b840; --mango-soft: #3a2f14;
+    --good: #5cc98a; --bad: #f08a7c; --bad-soft: #3b1d18;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+.wrap {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 24px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 40px);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+h1, h2 { font-family: var(--font-display); margin: 0; text-wrap: balance; }
+h1 { font-weight: 800; font-size: 2rem; line-height: 1.08; }
+h2 { font-weight: 600; font-size: 1.2rem; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.small { font-size: 14px; }
+.eyebrow {
+  font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700;
+}
+.stack { display: flex; flex-direction: column; gap: 8px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.card.highlight { background: var(--accent-soft); border-color: transparent; }
+
+label { display: flex; flex-direction: column; gap: 6px; font-weight: 700; font-size: 14px; }
+input {
+  font: inherit; font-weight: 400; font-size: 17px;
+  padding: 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--fg); width: 100%;
+}
+.btn {
+  font: inherit; font-weight: 700; font-size: 16px; cursor: pointer;
+  padding: 12px 18px; border-radius: 12px; border: 1px solid transparent;
+  background: var(--accent); color: var(--accent-fg);
+}
+.btn.secondary { background: transparent; color: var(--accent); border-color: var(--line); }
+.btn:disabled { opacity: .6; cursor: default; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.phrase {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: center;
+  padding: 12px 0; border-top: 1px solid var(--line);
+}
+.phrase:first-of-type { border-top: none; padding-top: 0; }
+.phrase .text { min-width: 0; }
+.tl { font-family: var(--font-display); font-weight: 600; font-size: 1.15rem; line-height: 1.25; }
+.de { color: var(--muted); font-size: 15px; }
+.play {
+  width: 46px; height: 46px; border-radius: 50%; border: none; cursor: pointer;
+  background: var(--accent); color: var(--accent-fg); display: grid; place-items: center;
+}
+.play svg { width: 18px; height: 18px; fill: currentColor; }
+.play.busy { background: var(--mango); }
+
+.toggle {
+  font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+  padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line);
+  background: transparent; color: var(--fg);
+}
+.toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+
+.msg { font-size: 14px; min-height: 1.4em; }
+.msg.error { color: var(--bad); }
+.msg.ok { color: var(--good); }
+
+.notice { background: var(--mango-soft); color: var(--fg); border-radius: 12px; padding: 12px 14px; font-size: 15px; }
+
+button:focus-visible, input:focus-visible { outline: 3px solid var(--mango); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
