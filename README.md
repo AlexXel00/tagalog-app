@@ -16,6 +16,7 @@ Geheime Schlüssel stehen nie in diesem Repo, nur in den Supabase-Secrets.
 ## Ordner
 
 - `index.html`, `css/`, `js/` - die App
+- `content/` - Lerninhalte pro Woche (Wörter, Sätze, Lückentexte, Grammatik, Aussprache, Kultur)
 - `sw.js` - Service Worker (offline, Audio-Speicher)
 - `manifest.webmanifest`, `icons/` - Installation auf dem Homescreen
 - `supabase/functions/tts/` - Edge Function für die Stimme
@@ -31,4 +32,14 @@ Geheime Schlüssel stehen nie in diesem Repo, nur in den Supabase-Secrets.
 
 ## Stand
 
-Version 0.1.2 - Grundgerüst: Login (mit Passwort anzeigen, ändern, vergessen), Startseite, Stimm-Test mit ElevenLabs (Standardstimme "Sarah").
+Version 0.2.0 - erste echte Session:
+
+1. Aussprache (Regel mit Hörbeispielen zum Nachsprechen)
+2. Wiederholung (Spaced Repetition, gespeichert in Supabase-Tabelle `learner_state`)
+3. Hauptteil, täglich wechselnd: Neue Wörter, Hör-Rätsel, Lückentext, Warum-Karte, Satzbaukasten
+4. Kultur-Häppchen
+
+Inhalt: Woche 1 (42 Wörter, 13 Sätze, 11 Lückentexte, 7 Grammatik-Karten, 6 Aussprache-Regeln, 8 Kulturtexte).
+Prüfliste für Muttersprachler in der App; Ergebnisse landen im Lernstand unter `review`.
+
+Offen: Betonungspaare (áso/asó) brauchen echte Aufnahmen, weil die Computerstimme Akzente nicht zuverlässig umsetzt.
