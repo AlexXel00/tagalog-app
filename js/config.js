@@ -4,6 +4,6 @@
 window.APP_CONFIG = {
   supabaseUrl: "https://howvdornaifhnmzxhvlg.supabase.co",
   supabaseKey: "sb_publishable_WdFl9D8ZeVAytZPlNBcWTw_xRgoYhR3",
-  voiceId: "gILcvhAz18uV9ARSsU4u",
-  version: "0.1.0"
+  voiceId: "EXAVITQu4vr4xnSDxMaL",
+  version: "0.1.1"
 };

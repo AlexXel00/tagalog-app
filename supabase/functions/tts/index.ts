@@ -11,7 +11,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
-const FALLBACK_VOICE_ID = "gILcvhAz18uV9ARSsU4u";
+const FALLBACK_VOICE_ID = "EXAVITQu4vr4xnSDxMaL";
 const MAX_TEXT_LENGTH = 400;
 
 const corsHeaders = {
