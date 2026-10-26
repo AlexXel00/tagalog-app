@@ -111,24 +111,58 @@
     }
   }
 
+  // ---------- Passwortfeld mit Auge ----------
+
+  var EYE_OPEN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c-5 0-9 4.5-10 7 1 2.5 5 7 10 7s9-4.5 10-7c-1-2.5-5-7-10-7zm0 11.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>';
+  var EYE_CLOSED = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.3 2.3 2 3.6l3.1 3.1C3.6 8 2.5 9.6 2 12c1 2.5 5 7 10 7 1.8 0 3.5-.6 4.9-1.4l3.5 3.5 1.3-1.3L3.3 2.3zM12 16.5A4.5 4.5 0 0 1 7.5 12c0-.7.2-1.4.5-2l1.5 1.5a2.5 2.5 0 0 0 3 3l1.5 1.5c-.6.3-1.3.5-2 .5zM12 5c5 0 9 4.5 10 7-.5 1.3-1.5 2.8-2.9 4.1l-3.3-3.3A4.5 4.5 0 0 0 11.2 7.5L8.6 5.6C9.7 5.2 10.8 5 12 5z"/></svg>';
+
+  // Liefert { wrap, input }: das Eingabefeld plus Knopf zum Anzeigen/Verbergen
+  function passwordField(id, autocomplete) {
+    var input = el("input", { type: "password", id: id, autocomplete: autocomplete, minLength: 8, required: true });
+    var eye = el("button", { className: "eye", type: "button", "aria-label": "Passwort anzeigen", "aria-pressed": "false" });
+    eye.innerHTML = EYE_OPEN;
+    eye.addEventListener("click", function () {
+      var show = input.type === "password";
+      input.type = show ? "text" : "password";
+      eye.innerHTML = show ? EYE_CLOSED : EYE_OPEN;
+      eye.setAttribute("aria-label", show ? "Passwort verbergen" : "Passwort anzeigen");
+      eye.setAttribute("aria-pressed", String(show));
+      input.focus();
+    });
+    return { wrap: el("div", { className: "pw" }, [input, eye]), input: input };
+  }
+
   // ---------- Bildschirm: Anmelden ----------
 
   function renderLogin() {
     app.innerHTML = "";
     var email = el("input", { type: "email", id: "email", autocomplete: "email", inputMode: "email", required: true });
-    var pass = el("input", { type: "password", id: "password", autocomplete: "current-password", minLength: 8, required: true });
+    var pw = passwordField("password", "current-password");
+    var pass = pw.input;
     var msg = el("p", { className: "msg" });
     var loginBtn = el("button", { className: "btn", type: "submit" }, "Anmelden");
     var signupBtn = el("button", { className: "btn secondary", type: "button" }, "Konto erstellen");
+    var forgotBtn = el("button", { className: "link", type: "button" }, "Passwort vergessen?");
 
     var form = el("form", { className: "card", noValidate: true }, [
       el("label", { htmlFor: "email" }, ["E-Mail", email]),
-      el("label", { htmlFor: "password" }, ["Passwort (mindestens 8 Zeichen)", pass]),
+      el("label", { htmlFor: "password" }, ["Passwort (mindestens 8 Zeichen)", pw.wrap]),
       el("div", { className: "row" }, [loginBtn, signupBtn]),
+      forgotBtn,
       msg
     ]);
 
-    function setBusy(b) { loginBtn.disabled = b; signupBtn.disabled = b; }
+    forgotBtn.addEventListener("click", async function () {
+      var addr = email.value.trim();
+      if (!addr) { show("Trag oben zuerst deine E-Mail ein.", "error"); email.focus(); return; }
+      setBusy(true);
+      var res = await sb.auth.resetPasswordForEmail(addr, { redirectTo: location.origin + location.pathname });
+      setBusy(false);
+      if (res.error) show("Das hat nicht geklappt: " + res.error.message, "error");
+      else show("Wir haben dir eine Mail geschickt. Öffne den Link darin, um ein neues Passwort zu setzen.", "ok");
+    });
+
+    function setBusy(b) { loginBtn.disabled = b; signupBtn.disabled = b; forgotBtn.disabled = b; }
     function show(text, kind) { msg.textContent = text; msg.className = "msg " + (kind || ""); }
 
     form.addEventListener("submit", async function (ev) {
@@ -154,6 +188,57 @@
       el("p", { className: "muted" }, "Melde dich an, damit die App deinen Fortschritt speichern kann.")
     ]));
     app.appendChild(form);
+  }
+
+  // ---------- Neues Passwort setzen ----------
+
+  // Formular fuer ein neues Passwort. onDone wird nach Erfolg aufgerufen.
+  function newPasswordForm(onDone) {
+    var pw1 = passwordField("newPassword", "new-password");
+    var pw2 = passwordField("newPassword2", "new-password");
+    var msg = el("p", { className: "msg" });
+    var save = el("button", { className: "btn", type: "submit" }, "Passwort speichern");
+    var form = el("form", { className: "stack", noValidate: true }, [
+      el("label", { htmlFor: "newPassword" }, ["Neues Passwort (mindestens 8 Zeichen)", pw1.wrap]),
+      el("label", { htmlFor: "newPassword2" }, ["Neues Passwort wiederholen", pw2.wrap]),
+      el("div", { className: "row" }, [save]),
+      msg
+    ]);
+    form.addEventListener("submit", async function (ev) {
+      ev.preventDefault();
+      msg.className = "msg error";
+      if (pw1.input.value.length < 8) { msg.textContent = "Das Passwort braucht mindestens 8 Zeichen."; return; }
+      if (pw1.input.value !== pw2.input.value) { msg.textContent = "Die beiden Passwörter sind nicht gleich."; return; }
+      save.disabled = true;
+      var res = await sb.auth.updateUser({ password: pw1.input.value });
+      save.disabled = false;
+      if (res.error) {
+        msg.textContent = /different|same/i.test(res.error.message) ? "Das neue Passwort muss sich vom alten unterscheiden." : "Speichern hat nicht geklappt: " + res.error.message;
+        return;
+      }
+      pw1.input.value = ""; pw2.input.value = "";
+      msg.className = "msg ok";
+      msg.textContent = "Neues Passwort gespeichert.";
+      if (onDone) onDone();
+    });
+    return form;
+  }
+
+  function renderRecovery() {
+    app.innerHTML = "";
+    app.appendChild(el("header", { className: "stack" }, [
+      el("p", { className: "eyebrow" }, "Tagalog"),
+      el("h1", null, "Neues Passwort"),
+      el("p", { className: "muted" }, "Wähle ein Passwort, das du nur für diese App verwendest.")
+    ]));
+    app.appendChild(el("section", { className: "card" }, [
+      newPasswordForm(function () {
+        setTimeout(function () {
+          history.replaceState(null, "", location.pathname);
+          sb.auth.getSession().then(function (res) { currentUserId = null; route(res.data.session); });
+        }, 1200);
+      })
+    ]));
   }
 
   // ---------- Bildschirm: Startseite ----------
@@ -200,11 +285,23 @@
       msg
     ]));
 
+    var pwSection = el("section", { className: "card", hidden: true }, [
+      el("h2", null, "Passwort ändern"),
+      el("p", { className: "muted small" }, "Am besten ein Passwort, das du nur für diese App verwendest."),
+      newPasswordForm(function () { setTimeout(function () { pwSection.hidden = true; }, 1500); })
+    ]);
+    app.appendChild(pwSection);
+
     var logout = el("button", { className: "btn secondary", type: "button" }, "Abmelden");
     logout.addEventListener("click", function () { sb.auth.signOut(); });
+    var changePw = el("button", { className: "btn secondary", type: "button" }, "Passwort ändern");
+    changePw.addEventListener("click", function () {
+      pwSection.hidden = !pwSection.hidden;
+      if (!pwSection.hidden) { pwSection.scrollIntoView({ behavior: "smooth", block: "start" }); pwSection.querySelector("input").focus(); }
+    });
     app.appendChild(el("footer", { className: "stack small muted" }, [
       el("p", null, "Angemeldet als " + (session.user.email || "")),
-      el("div", { className: "row" }, [logout]),
+      el("div", { className: "row" }, [changePw, logout]),
       el("p", null, "Version " + cfg.version)
     ]));
   }
@@ -212,7 +309,11 @@
   // ---------- Start ----------
 
   var currentUserId = null;
+  // Kommt man ueber den Link aus der "Passwort vergessen"-Mail, steht type=recovery in der Adresse
+  var recovering = /type=recovery/.test(location.hash + location.search);
+
   function route(session) {
+    if (recovering && session) { recovering = false; currentUserId = session.user.id; renderRecovery(); return; }
     var id = session && session.user ? session.user.id : null;
     if (id === currentUserId && app.childElementCount > 1) return;
     currentUserId = id;
@@ -220,8 +321,11 @@
     else renderLogin();
   }
 
+  sb.auth.onAuthStateChange(function (event, session) {
+    if (event === "PASSWORD_RECOVERY") recovering = true;
+    route(session);
+  });
   sb.auth.getSession().then(function (res) { route(res.data.session); });
-  sb.auth.onAuthStateChange(function (_event, session) { route(session); });
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", function () {

@@ -31,4 +31,4 @@ Geheime Schlüssel stehen nie in diesem Repo, nur in den Supabase-Secrets.
 
 ## Stand
 
-Version 0.1.1 - Grundgerüst: Login, Startseite, Stimm-Test mit ElevenLabs (Standardstimme "Sarah", im Gratis-Plan nutzbar).
+Version 0.1.2 - Grundgerüst: Login (mit Passwort anzeigen, ändern, vergessen), Startseite, Stimm-Test mit ElevenLabs (Standardstimme "Sarah").
