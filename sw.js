@@ -47,10 +47,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Eigene Dateien: zuerst Netz (fuer Updates), sonst Speicher
+  // Eigene Dateien: zuerst Netz (immer beim Server nachfragen, damit Updates sofort ankommen),
+  // ohne Netz aus dem Speicher
   if (url.origin === self.location.origin) {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: "no-cache" })
         .then((res) => {
           const copy = res.clone();
           caches.open(SHELL_CACHE).then((c) => c.put(req, copy));
