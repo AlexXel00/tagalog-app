@@ -222,3 +222,26 @@ input {
 
 button:focus-visible, input:focus-visible { outline: 3px solid var(--mango); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* ---------- Aufnehmen ---------- */
+.speak { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.mic {
+  font: inherit; font-weight: 700; font-size: 15px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 16px 10px 12px; border-radius: 999px;
+  border: 1px solid var(--accent); background: transparent; color: var(--accent);
+}
+.mic svg { width: 20px; height: 20px; fill: currentColor; }
+.mic.recording { background: var(--bad); border-color: var(--bad); color: var(--surface); animation: pulse 1.2s ease-in-out infinite; }
+.mic:disabled { opacity: .7; cursor: default; }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--bad-soft); } 50% { box-shadow: 0 0 0 8px var(--bad-soft); } }
+.speak-result { border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.speak-result.ok { background: var(--good-soft); }
+.speak-result.warn { background: var(--mango-soft); }
+.speak-result.bad { background: var(--bad-soft); }
+.speak-words { display: flex; flex-wrap: wrap; gap: 6px; font-family: var(--font-display); font-weight: 600; font-size: 1.1rem; }
+.speak-words .w { padding: 2px 8px; border-radius: 8px; }
+.speak-words .w.ok { background: var(--good); color: var(--surface); }
+.speak-words .w.close { background: var(--mango); color: var(--surface); }
+.speak-words .w.miss { background: var(--bad); color: var(--surface); text-decoration: line-through; }
+.small-btn { font-size: 14px; padding: 8px 12px; }

@@ -118,7 +118,7 @@
   function getAudioUrl(text) {
     if (audioUrls[text]) return Promise.resolve(audioUrls[text]);
     if (audioPending[text]) return audioPending[text];
-    audioPending[text] = sb.functions.invoke("tts", { body: { text: text, voiceId: cfg.voiceId } }).then(async function (res) {
+    audioPending[text] = sb.functions.invoke("tts", { body: { text: text, voiceId: cfg.voiceId, model: cfg.ttsModel, language: cfg.ttsLanguage } }).then(async function (res) {
       delete audioPending[text];
       if (res.error) {
         var code = await readFunctionError(res.error);
@@ -187,6 +187,207 @@
   }
 
   // =====================================================================
+  // Aufnehmen und Aussprache pruefen
+  // =====================================================================
+  // Ablauf: Mikrofon aufnehmen -> Edge Function "stt" (ElevenLabs-Spracherkennung)
+  // -> erkannten Text Wort fuer Wort mit dem Ziel vergleichen.
+
+  var MIC_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>';
+  var STOP_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+
+  var STT_ERRORS = {
+    not_signed_in: "Bitte melde dich neu an.",
+    not_allowed: "Dein Konto ist noch nicht freigeschaltet.",
+    too_long: "Die Aufnahme ist zu lang.",
+    no_audio: "Die Aufnahme war leer.",
+    missing_elevenlabs_key: "Der ElevenLabs-Schlüssel fehlt in Supabase."
+  };
+
+  function pickMime() {
+    if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return "";
+    var types = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+    for (var i = 0; i < types.length; i++) if (MediaRecorder.isTypeSupported(types[i])) return types[i];
+    return "";
+  }
+
+  // Kleinbuchstaben, ohne Akzente und Satzzeichen, in Woerter zerlegt
+  function normWords(s) {
+    return String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/[-–]/g, " ").replace(/[^a-z0-9'\s]/g, " ").split(/\s+/).filter(Boolean);
+  }
+
+  function lev(a, b) {
+    var m = a.length, n = b.length, d = [];
+    for (var i = 0; i <= m; i++) { d[i] = [i]; }
+    for (var j = 0; j <= n; j++) { d[0][j] = j; }
+    for (i = 1; i <= m; i++) for (j = 1; j <= n; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    return d[m][n];
+  }
+  function similarity(a, b) { return 1 - lev(a, b) / Math.max(a.length, b.length, 1); }
+
+  // Vergleicht Ziel und Gehoertes. Ergebnis pro Zielwort: "ok", "close" oder "miss".
+  function compareSpeech(target, heard) {
+    var t = normWords(target), h = normWords(heard), j = 0;
+    var marks = t.map(function (word) {
+      var best = 0, bestK = -1;
+      for (var k = j; k < Math.min(h.length, j + 3); k++) {
+        var sim = similarity(word, h[k]);
+        if (sim > best) { best = sim; bestK = k; }
+      }
+      var status = best === 1 ? "ok" : (best >= 0.7 ? "close" : "miss");
+      if (status !== "miss") j = bestK + 1;
+      return { word: word, status: status };
+    });
+    var points = marks.reduce(function (sum, m) { return sum + (m.status === "ok" ? 1 : m.status === "close" ? 0.5 : 0); }, 0);
+    return { marks: marks, score: t.length ? points / t.length : 0 };
+  }
+
+  async function transcribe(blob, ext) {
+    var session = (await sb.auth.getSession()).data.session;
+    if (!session) throw new Error(STT_ERRORS.not_signed_in);
+    var fd = new FormData();
+    fd.append("file", blob, "aufnahme." + ext);
+    var res = await fetch(cfg.supabaseUrl + "/functions/v1/stt", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + session.access_token, apikey: cfg.supabaseKey },
+      body: fd
+    });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok) {
+      if (data.error === "elevenlabs_failed" && data.status === 401) throw new Error("Die Spracherkennung ist am ElevenLabs-Schlüssel noch nicht freigeschaltet.");
+      throw new Error(STT_ERRORS[data.error] || "Die Spracherkennung ist gerade nicht erreichbar.");
+    }
+    return data;
+  }
+
+  function rememberSpeech(id, score) {
+    if (!id || !state) return;
+    state.speech = state.speech || {};
+    var s = state.speech[id] || { tries: 0, best: 0 };
+    s.tries += 1;
+    s.last = Math.round(score * 100);
+    s.best = Math.max(s.best, s.last);
+    s.date = today();
+    state.speech[id] = s;
+  }
+
+  // Baustein: Aufnahme-Knopf plus Auswertung fuer einen Zieltext.
+  // onResult(score) wird nach jeder Auswertung aufgerufen.
+  function speechCheck(target, opts) {
+    opts = opts || {};
+    var wrap = el("div", { className: "speak" });
+    var mic = el("button", { className: "mic", type: "button" });
+    var label = el("span", null, opts.label || "Aufnehmen und prüfen");
+    var status = el("p", { className: "muted small" });
+    var result = el("div", { className: "speak-result", hidden: true });
+    mic.innerHTML = MIC_ICON;
+    mic.appendChild(label);
+    wrap.appendChild(el("div", { className: "row" }, [mic]));
+    wrap.appendChild(status);
+    wrap.appendChild(result);
+
+    var rec = null, stream = null, chunks = [], timer = null, startedAt = 0, mime = pickMime();
+    var maxMs = Math.min(10000, 2500 + normWords(target).length * 900);
+
+    function setIdle(text) {
+      mic.classList.remove("recording");
+      mic.innerHTML = MIC_ICON;
+      label.textContent = text || "Nochmal aufnehmen";
+      mic.appendChild(label);
+      mic.disabled = false;
+    }
+
+    async function start() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+        status.textContent = "Dieser Browser kann nicht aufnehmen. Öffne die App in Safari oder Chrome.";
+        return;
+      }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        status.textContent = e && e.name === "NotAllowedError"
+          ? "Das Mikrofon ist blockiert. Erlaube es am iPhone unter Einstellungen > Apps > Safari > Mikrofon und lade die App neu."
+          : "Das Mikrofon konnte nicht gestartet werden.";
+        return;
+      }
+      player.pause();
+      chunks = [];
+      rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      rec.ondataavailable = function (ev) { if (ev.data && ev.data.size) chunks.push(ev.data); };
+      rec.onstop = finish;
+      rec.start();
+      startedAt = Date.now();
+      mic.classList.add("recording");
+      mic.innerHTML = STOP_ICON;
+      label.textContent = "Fertig";
+      mic.appendChild(label);
+      status.textContent = "Sprich jetzt: " + target;
+      timer = setTimeout(stop, maxMs);
+    }
+
+    function stop() {
+      clearTimeout(timer);
+      if (rec && rec.state === "recording") rec.stop();
+    }
+
+    async function finish() {
+      if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+      var type = (rec && rec.mimeType) || mime || "audio/mp4";
+      var blob = new Blob(chunks, { type: type });
+      rec = null;
+      if (Date.now() - startedAt < 500 || blob.size < 1000) {
+        setIdle("Aufnehmen und prüfen");
+        status.textContent = "Das war zu kurz. Tippe, sprich, und tippe dann auf Fertig.";
+        return;
+      }
+      mic.disabled = true;
+      mic.classList.remove("recording");
+      label.textContent = "Wird geprüft ...";
+      status.textContent = "";
+      var ext = type.indexOf("webm") >= 0 ? "webm" : type.indexOf("ogg") >= 0 ? "ogg" : "m4a";
+      try {
+        var data = await transcribe(blob, ext);
+        showResult(data.text || "", blob);
+      } catch (e) {
+        status.textContent = e.message;
+      }
+      setIdle();
+    }
+
+    function showResult(heard, blob) {
+      var cmp = compareSpeech(target, heard);
+      var pct = Math.round(cmp.score * 100);
+      var verdict = !heard.trim() ? "Ich habe nichts verstanden. Sprich etwas lauter oder näher am Handy."
+        : pct >= 90 ? "Sehr gut! Man versteht dich."
+        : pct >= 60 ? "Fast. Hör dir die markierten Wörter nochmal an."
+        : "Noch nicht ganz. Hör zu und versuch es nochmal.";
+      result.innerHTML = "";
+      result.className = "speak-result " + (pct >= 90 ? "ok" : pct >= 60 ? "warn" : "bad");
+      result.hidden = false;
+      result.appendChild(el("p", { className: "verdict" }, verdict));
+      result.appendChild(el("p", { className: "speak-words" }, cmp.marks.map(function (m) {
+        return el("span", { className: "w " + m.status }, m.word);
+      })));
+      result.appendChild(el("p", { className: "muted small" }, "Verstanden wurde: „" + (heard.trim() || "...") + "“"));
+      var mine = el("button", { className: "btn secondary small-btn", type: "button" }, "Meine Aufnahme anhören");
+      var url = URL.createObjectURL(blob);
+      mine.addEventListener("click", function () { player.pause(); player.src = url; player.playbackRate = 1; player.play().catch(function () {}); });
+      var orig = el("button", { className: "btn secondary small-btn", type: "button" }, "Original anhören");
+      orig.addEventListener("click", function () { speak(target, orig); });
+      result.appendChild(el("div", { className: "row" }, [mine, orig]));
+      rememberSpeech(opts.id, cmp.score);
+      if (opts.onResult) opts.onResult(cmp.score);
+    }
+
+    mic.addEventListener("click", function () {
+      if (rec && rec.state === "recording") stop(); else start();
+    });
+    return wrap;
+  }
+
+  // =====================================================================
   // Lernstand (Spaced Repetition) und Speicherung
   // =====================================================================
 
@@ -213,7 +414,7 @@
   })();
 
   function defaultState() {
-    return { version: 1, items: {}, history: [], lastFormat: null, cultureIndex: 0, pronIndex: 0, review: {} };
+    return { version: 1, items: {}, history: [], lastFormat: null, cultureIndex: 0, pronIndex: 0, review: {}, speech: {} };
   }
 
   function localKey() { return "tagalog-state-" + userId; }
@@ -305,7 +506,8 @@
     hoer: { name: "Hör-Rätsel", desc: "Hören und erraten, was gesagt wird" },
     luecke: { name: "Lückentext", desc: "Sätze vervollständigen wie im Schulbuch" },
     warum: { name: "Warum-Karte", desc: "Grammatik verstehen, mit der Logik dahinter" },
-    satzbau: { name: "Satzbaukasten", desc: "Sätze aus Bausteinen zusammensetzen" }
+    satzbau: { name: "Satzbaukasten", desc: "Sätze aus Bausteinen zusammensetzen" },
+    sprechen: { name: "Sprech-Challenge", desc: "Nachsprechen und deine Aussprache prüfen lassen" }
   };
 
   function planToday() {
@@ -315,7 +517,7 @@
     if (learned < 10) {
       format = "neu";
     } else {
-      var pool = ["hoer", "luecke", "warum", "satzbau"];
+      var pool = ["hoer", "luecke", "warum", "satzbau", "sprechen"];
       if (unseenNew().length) pool.push("neu", "neu");
       pool = pool.filter(function (f) { return f !== state.lastFormat; });
       format = pool[Math.floor(rnd() * pool.length)];
@@ -668,10 +870,12 @@
     body.appendChild(el("section", { className: "card" }, [
       el("div", { className: "row between" }, [el("h2", null, rule.title), slowToggle()]),
       el("p", null, rule.tip),
-      el("div", null, rule.examples.map(function (ex) { return phraseRow(ex, null); })),
-      el("p", { className: "muted small" }, "Hör dir jedes Beispiel an und sprich es laut nach. Ruhig zwei-, dreimal.")
+      el("p", { className: "muted small" }, "Hör dir jedes Beispiel an, sprich es nach und lass es prüfen.")
     ]));
-    body.appendChild(el("div", { className: "row" }, [nextButton("Nachgesprochen, weiter", next)]));
+    rule.examples.forEach(function (ex) {
+      body.appendChild(el("section", { className: "card" }, [phraseRow(ex, null), speechCheck(ex, { id: "pron:" + ex })]));
+    });
+    body.appendChild(el("div", { className: "row" }, [nextButton("Weiter", next)]));
   }
 
   // =====================================================================
@@ -696,7 +900,11 @@
         front = el("div", { className: "stack" }, [el("p", { className: "muted small" }, "Erinnerst du dich an die Regel?"), el("p", { className: "tl big" }, item.title)]);
         back = el("div", { className: "stack" }, item.body.map(function (p) { return el("p", null, p); }).concat(item.examples.map(function (ex) { return phraseRow(ex[0], ex[1]); })));
       } else if (reverse) {
-        front = el("div", { className: "stack" }, [el("p", { className: "muted small" }, "Wie sagt man auf Tagalog?"), el("p", { className: "tl big" }, item.de)]);
+        front = el("div", { className: "stack" }, [
+          el("p", { className: "muted small" }, "Wie sagt man auf Tagalog? Sag es laut."),
+          el("p", { className: "tl big" }, item.de),
+          speechCheck(item.tl, { id: item.id, label: "Laut sagen und prüfen" })
+        ]);
         back = el("div", { className: "stack" }, [phraseRow(item.tl, item.stress !== item.tl ? "Betonung: " + item.stress : null), item.note ? el("p", { className: "muted small" }, item.note) : null]);
       } else {
         front = el("div", { className: "stack" }, [el("p", { className: "muted small" }, "Was heißt das?"), phraseRow(item.tl, null)]);
@@ -757,7 +965,7 @@
         phraseRow(it.tl, it.de),
         it.stress !== it.tl ? el("p", { className: "muted small" }, "Betonung: " + it.stress) : null,
         it.note ? el("p", { className: "muted small" }, it.note) : null,
-        el("p", { className: "muted small" }, "Anhören und laut nachsprechen.")
+        speechCheck(it.tl, { id: it.id, label: "Nachsprechen und prüfen" })
       ]));
       box.appendChild(nextButton("Weiter", function () { i += 1; showIntro(); }));
       speak(it.tl, null, true);
@@ -950,6 +1158,42 @@
       box.appendChild(check);
       box.appendChild(feedback);
       render();
+    }
+    round();
+  };
+
+  // --- Sprech-Challenge ---
+  MAIN.sprechen = function (body, next) {
+    var rnd = seeded("sprechen-" + today());
+    var pool = seenOfKind(["word", "sentence"]);
+    // Bevorzugt Eintraege, die bisher schlecht verstanden wurden
+    var speech = state.speech || {};
+    pool.sort(function (a, b) { return ((speech[a] || {}).best || 0) - ((speech[b] || {}).best || 0) + (rnd() - 0.5) * 30; });
+    var ids = pool.slice(0, 5);
+    if (ids.length < 3) { MAIN.neu(body, next); return; }
+    prefetch(ids.map(function (id) { return ITEMS[id].tl; }));
+    var i = 0;
+    var box = el("div", { className: "stack-lg" });
+    body.appendChild(box);
+    function round() {
+      box.innerHTML = "";
+      if (i >= ids.length) { saveState(); next(); return; }
+      var it = ITEMS[ids[i]];
+      var counted = false;
+      var weiter = nextButton("Weiter", function () { i += 1; round(); });
+      box.appendChild(el("p", { className: "muted small" }, "Challenge " + (i + 1) + " von " + ids.length + ": Erst anhören, dann nachsprechen."));
+      box.appendChild(el("section", { className: "card" }, [
+        el("div", { className: "row between" }, [el("p", { className: "eyebrow" }, it.kind === "sentence" ? "Satz" : "Wort"), slowToggle()]),
+        phraseRow(it.tl, it.de),
+        it.stress !== it.tl ? el("p", { className: "muted small" }, "Betonung: " + it.stress) : null,
+        speechCheck(it.tl, { id: it.id, onResult: function (score) {
+          if (counted) return;
+          counted = true;
+          sessionResult.total += 1;
+          if (score >= 0.75) sessionResult.correct += 1;
+        } })
+      ]));
+      box.appendChild(weiter);
     }
     round();
   };

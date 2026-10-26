@@ -1,5 +1,5 @@
 // Service Worker: macht die App offline-faehig und speichert Audios.
-const VERSION = "v0.2.0";
+const VERSION = "v0.3.0";
 const SHELL_CACHE = "shell-" + VERSION;
 const AUDIO_CACHE = "audio-v1";
 const SHELL_FILES = [

@@ -7,12 +7,18 @@
 //   ALLOWED_EMAILS      - kommagetrennte E-Mail-Adressen, die die Funktion nutzen duerfen
 // Optional:
 //   DEFAULT_VOICE_ID    - Stimme, falls die App keine mitschickt
-//   ELEVENLABS_MODEL    - Modell, Standard "eleven_multilingual_v2"
+//   ELEVENLABS_MODEL    - Modell, falls die App keins mitschickt (Standard "eleven_flash_v2_5")
+//
+// Die App kann "model" und "language" mitschicken. Erlaubt sind nur die Werte unten.
+// language "fil" zwingt das Modell, Filipino zu sprechen (sonst liest es kurze Woerter
+// manchmal englisch, z.B. "mabuti" wie "my booty"). eleven_multilingual_v2 kennt das nicht.
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
 const FALLBACK_VOICE_ID = "EXAVITQu4vr4xnSDxMaL";
 const MAX_TEXT_LENGTH = 400;
+const ALLOWED_MODELS = ["eleven_flash_v2_5", "eleven_v3", "eleven_multilingual_v2", "eleven_turbo_v2_5"];
+const ALLOWED_LANGUAGES = ["fil", ""];
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -60,7 +66,7 @@ Deno.serve(async (req: Request) => {
   if (!allowed.includes(email)) return json({ error: "not_allowed" }, 403);
 
   // Schritt 2: Eingabe pruefen
-  let body: { text?: unknown; voiceId?: unknown };
+  let body: { text?: unknown; voiceId?: unknown; model?: unknown; language?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -73,10 +79,14 @@ Deno.serve(async (req: Request) => {
   const voiceId = /^[A-Za-z0-9]{10,40}$/.test(requestedVoice)
     ? requestedVoice
     : Deno.env.get("DEFAULT_VOICE_ID") || FALLBACK_VOICE_ID;
-  const model = Deno.env.get("ELEVENLABS_MODEL") || "eleven_multilingual_v2";
+  const model = typeof body.model === "string" && ALLOWED_MODELS.includes(body.model)
+    ? body.model
+    : Deno.env.get("ELEVENLABS_MODEL") || "eleven_flash_v2_5";
+  let language = typeof body.language === "string" && ALLOWED_LANGUAGES.includes(body.language) ? body.language : "fil";
+  if (model === "eleven_multilingual_v2") language = "";
 
   // Schritt 3: Gibt es das Audio schon?
-  const key = await sha256Hex(`${model}|${voiceId}|${text}`);
+  const key = await sha256Hex(`${model}|${language}|${voiceId}|${text}`);
   const path = `${voiceId}/${key}.mp3`;
   const admin = createClient(supabaseUrl, serviceKey);
   const bucket = admin.storage.from("audio");
@@ -100,7 +110,7 @@ Deno.serve(async (req: Request) => {
         "Content-Type": "application/json",
         Accept: "audio/mpeg",
       },
-      body: JSON.stringify({ text, model_id: model }),
+      body: JSON.stringify(language ? { text, model_id: model, language_code: language } : { text, model_id: model }),
     },
   );
   if (!ttsRes.ok) {
